@@ -4,8 +4,7 @@ EXEC = docker exec -it
 DC = docker compose
 MANAGE_PY = python src/manage.py
 
-
-APP_CONTAINER = django
+APP_CONTAINER = odoo
 WORKER_1_CONTAINER = celery_worker_1
 WORKER_2_CONTAINER = celery_worker_2
 WORKER_3_CONTAINER = celery_worker_3
@@ -24,26 +23,31 @@ NETWORK_NAME_PROD = backend-prod
 
 MAKE = make
 
-.PHONY: check-network \
+.PHONY: check-network check-network-prod \
         up-all up-all-no-cache \
         up-monitoring up-monitoring-no-cache \
         down-all down-all-volumes \
         down-monitoring down-monitoring-volumes \
-        up-django logs-monitoring \
-        up-db up-db-no-cache down-db down-db-volumes logs-db \
-        up-django no-cache-django down-django down-django-volumes logs-django \
-        up-pgadmin down-pgadmin logs-pgadmin \
-        up-adminer down-adminer logs-adminer \
+        up-all-without-monitoring up-all-no-cache-without-monitoring \
+        up-all-without-monitoring-prod up-all-no-cache-without-monitoring-prod \
+        down-all-without-monitoring down-all-without-monitoring-prod \
+        up-db up-db-no-cache up-db-no-cache-prod \
+        down-db down-db-prod down-db-volumes logs-db load-backup \
+        up-odoo up-odoo-no-cache up-odoo-prod up-odoo-no-cache-prod \
+        down-odoo down-odoo-prod down-odoo-volumes logs-odoo \
+        migrations migrate superuser test collectstatic check-apm test-apm \
+        up-pgadmin up-pgadmin-prod down-pgadmin down-pgadmin-prod down-pgadmin-volumes logs-pgadmin \
+        up-adminer up-adminer-prod up-adminer-no-cache-prod down-adminer down-adminer-prod down-adminer-volumes logs-adminer \
         up-redis down-redis logs-redis \
         up-nginx down-nginx logs-nginx \
-        up-elastic up-kibana up-apm \
-        down-elastic down-kibana down-apm \
-        logs-elastic logs-kibana logs-apm \
-		test-apm load-backup
+        up-elastic down-elastic logs-elastic \
+        up-kibana down-kibana logs-kibana \
+        up-apm down-apm logs-apm \
+        stop-all rm-all
 
 check-network:
 	@echo "Checking for network $(NETWORK_NAME)..."
-	@if ! docker network ls | grep -q $(NETWORK_NAME); then \
+	@if ! docker network ls | grep -q "$(NETWORK_NAME)"; then \
 		echo "Network $(NETWORK_NAME) does not exist. Creating..."; \
 		docker network create $(NETWORK_NAME); \
 	else \
@@ -52,63 +56,70 @@ check-network:
 
 check-network-prod:
 	@echo "Checking for network $(NETWORK_NAME_PROD)..."
-	@if ! docker network ls | grep -q $(NETWORK_NAME_PROD); then \
+	@if ! docker network ls | grep -q "$(NETWORK_NAME_PROD)"; then \
 		echo "Network $(NETWORK_NAME_PROD) does not exist. Creating..."; \
 		docker network create $(NETWORK_NAME_PROD); \
 	else \
 		echo "Network $(NETWORK_NAME_PROD) already exists."; \
 	fi
 
+# === High-level ===
 up-all: check-network
 	$(MAKE) up-db
-	$(MAKE) up-django
+	$(MAKE) up-odoo
 	$(MAKE) up-pgadmin
 	$(MAKE) up-adminer
 
 up-all-no-cache: check-network
 	$(MAKE) up-db-no-cache
-	$(MAKE) up-django-no-cache
+	$(MAKE) up-odoo-no-cache
 	$(MAKE) up-pgadmin
 	$(MAKE) up-adminer
 
 down-all:
 	$(MAKE) down-db
-	$(MAKE) down-django
+	$(MAKE) down-odoo
 	$(MAKE) down-pgadmin
 	$(MAKE) down-adminer
 
 up-all-without-monitoring: check-network
 	$(MAKE) up-db
-	$(MAKE) up-django
+	$(MAKE) up-odoo
 	$(MAKE) up-pgadmin
 	$(MAKE) up-adminer
 
 up-all-no-cache-without-monitoring: check-network
 	$(MAKE) up-db-no-cache
-	$(MAKE) up-django-no-cache
+	$(MAKE) up-odoo-no-cache
 	$(MAKE) up-pgadmin
 	$(MAKE) up-adminer
 
+up-all-without-monitoring-prod: check-network-prod
+	$(MAKE) up-db-no-cache-prod
+	$(MAKE) up-odoo-prod
+	$(MAKE) up-adminer-prod
+
 up-all-no-cache-without-monitoring-prod: check-network-prod
 	$(MAKE) up-db-no-cache-prod
-	$(MAKE) up-django-no-cache-prod
+	$(MAKE) up-odoo-no-cache-prod
+	$(MAKE) up-adminer-no-cache-prod
 
 down-all-without-monitoring:
 	$(MAKE) down-db
-	$(MAKE) down-django
+	$(MAKE) down-odoo
 
 down-all-without-monitoring-prod:
 	$(MAKE) down-db-prod
-	$(MAKE) down-django-prod
-	$(MAKE) down-pgadmin-prod
+	$(MAKE) down-odoo-prod
 	$(MAKE) down-adminer-prod
 
 down-all-volumes:
 	$(MAKE) down-db-volumes
-	$(MAKE) down-django-volumes
+	$(MAKE) down-odoo-volumes
 	$(MAKE) down-pgadmin-volumes
 	$(MAKE) down-adminer-volumes
 
+# === Monitoring stack ===
 up-monitoring:
 	$(DC) -f docker_compose/elastic/docker-compose.yml \
 	      -f docker_compose/kibana/docker-compose.yml \
@@ -137,7 +148,7 @@ logs-monitoring:
 	$(LOGS) $(KIBANA_CONTAINER)
 	$(LOGS) $(APM_CONTAINER)
 
-# DB
+# === DB ===
 up-db:
 	$(DC) -f docker_compose/db/docker-compose.yml $(ENV) up -d
 
@@ -164,55 +175,57 @@ logs-db:
 # make load-backup FILE=your_backup_file.dump
 load-backup:
 	@echo "Restoring backup $(FILE) into database..."
-	docker exec -i $(DB_CONTAINER) \
-	    pg_restore -U $(POSTGRES_USER) -d $(POSTGRES_DB) "/backups/$(FILE)"
+	docker exec -i $(DB_CONTAINER) pg_restore -U $(POSTGRES_USER) -d $(POSTGRES_DB) "/backups/$(FILE)"
 
-# Django
-up-django:
-	$(DC) -f docker_compose/django/docker-compose.yml $(ENV) up -d
+# === Odoo/App ===
+up-odoo:
+	$(DC) -f docker_compose/odoo/docker-compose.yml $(ENV) up -d
 
-up-django-no-cache:
-	$(DC) -f docker_compose/django/docker-compose.yml $(ENV) build --no-cache
-	$(DC) -f docker_compose/django/docker-compose.yml $(ENV) up -d
+up-odoo-no-cache:
+	$(DC) -f docker_compose/odoo/docker-compose.yml $(ENV) build --no-cache
+	$(DC) -f docker_compose/odoo/docker-compose.yml $(ENV) up -d
 
-up-django-no-cache-prod:
-	$(DC) -f docker_compose/django/docker-compose-prod.yml $(ENV) build --no-cache
-	$(DC) -f docker_compose/django/docker-compose-prod.yml $(ENV) up -d
+up-odoo-prod:
+	$(DC) -f docker_compose/odoo/docker-compose-prod.yml $(ENV) up -d
 
-down-django:
-	$(DC) -f docker_compose/django/docker-compose.yml down
+up-odoo-no-cache-prod:
+	$(DC) -f docker_compose/odoo/docker-compose-prod.yml $(ENV) build --no-cache
+	$(DC) -f docker_compose/odoo/docker-compose-prod.yml $(ENV) up -d
 
-down-django-prod:
-	$(DC) -f docker_compose/django/docker-compose-prod.yml down
+down-odoo:
+	$(DC) -f docker_compose/odoo/docker-compose.yml down
 
-down-django-volumes:
-	$(DC) -f docker_compose/django/docker-compose.yml down -v
+down-odoo-prod:
+	$(DC) -f docker_compose/odoo/docker-compose-prod.yml down
 
-logs-django:
+down-odoo-volumes:
+	$(DC) -f docker_compose/odoo/docker-compose.yml down -v
+
+logs-odoo:
 	$(LOGS) $(APP_CONTAINER)
 
 migrations:
-	$(EXEC) $(APP_CONTAINER) sh -c ' PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} makemigrations'
+	$(EXEC) $(APP_CONTAINER) sh -c 'PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} makemigrations'
 
 migrate:
-	$(EXEC) $(APP_CONTAINER) sh -c ' PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} migrate'
+	$(EXEC) $(APP_CONTAINER) sh -c 'PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} migrate'
 
 superuser:
-	$(EXEC) $(APP_CONTAINER) sh -c ' PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} createsuperuser'
+	$(EXEC) $(APP_CONTAINER) sh -c 'PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} createsuperuser'
 
 test:
 	$(EXEC) $(APP_CONTAINER) ${MANAGE_PY} test
 
 collectstatic:
-	$(EXEC) $(APP_CONTAINER) sh -c ' PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} collectstatic --noinput'
+	$(EXEC) $(APP_CONTAINER) sh -c 'PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} collectstatic --noinput'
 
 check-apm:
-	$(EXEC) $(APP_CONTAINER) sh -c ' PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} elasticapm check'
+	$(EXEC) $(APP_CONTAINER) sh -c 'PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} elasticapm check'
 
 test-apm:
-	$(EXEC) $(APP_CONTAINER) sh -c ' PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} elasticapm test'
+	$(EXEC) $(APP_CONTAINER) sh -c 'PYTHONPATH=/app/src:$$PYTHONPATH ${MANAGE_PY} elasticapm test'
 
-# PgAdmin
+# === PgAdmin ===
 up-pgadmin:
 	$(DC) -f docker_compose/pgadmin/docker-compose.yml $(ENV) up -d
 
@@ -225,14 +238,21 @@ down-pgadmin:
 down-pgadmin-prod:
 	$(DC) -f docker_compose/pgadmin/docker-compose-prod.yml down
 
+down-pgadmin-volumes:
+	$(DC) -f docker_compose/pgadmin/docker-compose.yml down -v
+
 logs-pgadmin:
 	$(LOGS) pgadmin
 
-# Adminer
+# === Adminer ===
 up-adminer:
 	$(DC) -f docker_compose/adminer/docker-compose.yml $(ENV) up -d
 
 up-adminer-prod:
+	$(DC) -f docker_compose/adminer/docker-compose-prod.yml $(ENV) up -d
+
+up-adminer-no-cache-prod:
+	$(DC) -f docker_compose/adminer/docker-compose-prod.yml $(ENV) build --no-cache
 	$(DC) -f docker_compose/adminer/docker-compose-prod.yml $(ENV) up -d
 
 down-adminer:
@@ -241,10 +261,13 @@ down-adminer:
 down-adminer-prod:
 	$(DC) -f docker_compose/adminer/docker-compose-prod.yml down
 
+down-adminer-volumes:
+	$(DC) -f docker_compose/adminer/docker-compose.yml down -v
+
 logs-adminer:
 	$(LOGS) adminer-postgres
 
-# Redis
+# === Redis ===
 up-redis:
 	$(DC) -f docker_compose/redis/docker-compose.yml $(ENV) up -d
 
@@ -254,7 +277,7 @@ down-redis:
 logs-redis:
 	$(LOGS) $(REDIS_CONTAINER)
 
-# Nginx
+# === Nginx ===
 up-nginx:
 	$(DC) -f docker_compose/nginx/docker-compose.yml $(ENV) up -d
 
@@ -264,7 +287,7 @@ down-nginx:
 logs-nginx:
 	$(LOGS) $(NGINX_CONTAINER)
 
-# Elastic
+# === Elastic ===
 up-elastic:
 	$(DC) -f docker_compose/elastic/docker-compose.yml $(ENV) up -d
 
@@ -274,7 +297,7 @@ down-elastic:
 logs-elastic:
 	$(LOGS) $(ELASTIC_CONTAINER)
 
-# Kibana
+# === Kibana ===
 up-kibana:
 	$(DC) -f docker_compose/kibana/docker-compose.yml $(ENV) up -d
 
@@ -284,7 +307,7 @@ down-kibana:
 logs-kibana:
 	$(LOGS) $(KIBANA_CONTAINER)
 
-# APM
+# === APM ===
 up-apm:
 	$(DC) -f docker_compose/apm/docker-compose.yml $(ENV) up -d
 
@@ -294,8 +317,9 @@ down-apm:
 logs-apm:
 	$(LOGS) $(APM_CONTAINER)
 
+# === Utils ===
 stop-all:
-	docker stop $(docker ps -q -a)
+	docker stop $$(docker ps -aq) || true
 
 rm-all:
-	docker rm $(docker ps -q -a)
+	docker rm $$(docker ps -aq) || true
