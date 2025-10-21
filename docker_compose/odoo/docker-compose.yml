@@ -19,6 +19,8 @@ services:
       - odoo-data:/var/lib/odoo
       - ../../src/addons:/mnt/extra-addons
       - ../../src/configs/odoo.conf:/etc/odoo/odoo.conf:ro
+      - ../../backups:/mnt/backups
+      - ../../logs:/mnt/logs
     networks:
       - backend
   nginx:
