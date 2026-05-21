@@ -1,0 +1,66 @@
+---
+title: Architecture
+description: How the services fit together and which port talks to what.
+---
+
+# Architecture
+
+```
+                              ┌──────────────────────┐
+                              │       Host / dev     │
+                              └──────────────────────┘
+                                          │
+        ┌────────┬──────┬──────┬──────────┴─────┬─────────────┬──────────┐
+        ▼        ▼      ▼      ▼                ▼             ▼          ▼
+      :5433   :5050   :8080  :8081           :15672         :8089      :3000
+     (nginx)(pgAdmin)(Adminer)(redis-cmd) (RabbitMQ UI)  (kafka-ui)  (Grafana)
+        │      │      │      │                │             │          │
+  ──────┴──────┴──────┴──────┴── docker network: backend ───┴──────────┴──────
+        │             │      │             │                │          │
+        ▼             ▼      ▼             ▼                ▼          ▼
+    ┌──────┐    ┌──────────┐ ┌───────┐  ┌────────┐    ┌───────┐  ┌──────────┐
+    │ odoo │◀──▶│ postgres │ │ redis │  │rabbitmq│    │ kafka │  │prometheus│
+    └──────┘    └──────────┘ └───────┘  └────────┘    └───────┘  └──────────┘
+        │             ▲          ▲          ▲             ▲           ▲
+        │ /metrics    │ 9187     │ 9121     │ 15692       │ 9308      │
+        └─────────────┴──────────┴──────────┴─────────────┴───────────┘
+                              scraped by Prometheus
+```
+
+## Boot order
+
+Compose handles healthcheck-based ordering inside each compose file, but
+**across** compose files (because they're split), the dependency order is
+your responsibility. The Make targets respect it:
+
+1. `network`  — must exist before anything joins it.
+2. `up-db`    — Odoo can't boot without postgres.
+3. `up-odoo`  — also brings up nginx.
+4. `up-pgadmin`, `up-adminer` — UIs (optional).
+5. `up-brokers` — independent, run anytime after `network`.
+6. `up-monitoring` — independent; exporters target services already running.
+
+`make up` and `make up-full` chain these in the right order.
+
+## Volumes
+
+| Volume name          | Mounted at                  | Lifecycle                              |
+|----------------------|------------------------------|----------------------------------------|
+| `odoo-data`          | `/var/lib/odoo`              | Odoo filestore, session data           |
+| `postgres_data_odoo` | `/var/lib/postgresql/data`   | All Postgres databases                 |
+| `redis_data`         | `/data`                      | Redis AOF + RDB snapshots              |
+| `rabbitmq_data`      | `/var/lib/rabbitmq`          | RabbitMQ Mnesia + queue persistence    |
+| `kafka_data`         | `/bitnami/kafka`             | Kafka log dirs + KRaft metadata        |
+| `prometheus_data`    | `/prometheus`                | TSDB (15-day retention)                |
+| `grafana_data`       | `/var/lib/grafana`           | Dashboards / users / plugin config     |
+
+## Bind mounts
+
+| Host path                  | Inside container         | What                              |
+|----------------------------|---------------------------|-----------------------------------|
+| `./src/addons/`            | `/mnt/extra-addons`       | Custom Odoo addons                |
+| `./src/configs/odoo.conf`  | `/etc/odoo/odoo.conf` (ro)| Odoo configuration                |
+| `./logs/`                  | `/mnt/logs`               | Odoo logfile                      |
+| `./logs/nginx/`            | `/var/log/nginx`          | Nginx access / error logs         |
+| `./backups/`               | `/mnt/backups`            | On-demand DB backups (host-side)  |
+| `./docker_compose/db/backups/` | `/backups`            | Sidecar's daily backups           |

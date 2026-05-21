@@ -1,3 +1,70 @@
-logs/*
+# ---------------------------------------------------------------------------
+# Environment / secrets
+# ---------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.secret
+*.key
+*.pem
+
+# ---------------------------------------------------------------------------
+# Backups (keep folder, ignore contents)
+# ---------------------------------------------------------------------------
+backups/*
+!backups/.gitkeep
 docker_compose/db/backups/*
+!docker_compose/db/backups/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Logs (keep folder structure, ignore contents)
+# ---------------------------------------------------------------------------
+logs/*
+!logs/.gitkeep
+!logs/nginx/
+!logs/odoo/
 logs/nginx/*
+!logs/nginx/.gitkeep
+logs/odoo/*
+!logs/odoo/.gitkeep
+*.log
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Docker / build artefacts
+# ---------------------------------------------------------------------------
+*.pid
+*.sqlite3
+node_modules/
+
+# ---------------------------------------------------------------------------
+# Grafana / Prometheus runtime data (only relevant if bind-mounted)
+# ---------------------------------------------------------------------------
+docker_compose/monitoring/grafana/data/
+docker_compose/monitoring/prometheus/data/

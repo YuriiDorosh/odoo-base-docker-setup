@@ -1,0 +1,209 @@
+# =============================================================================
+# Project-wide Python tooling configuration.
+#
+# Only used for HOST-side linting / formatting / testing of the custom addons
+# under ``src/addons``. The Odoo container itself ships its own Python env and
+# doesn't read this file.
+# =============================================================================
+
+[project]
+name            = "odoo-base-docker-setup"
+version         = "0.1.0"
+description     = "Batteries-included Docker template for Odoo 18 (Postgres, Nginx, brokers, monitoring)."
+readme          = "README.md"
+requires-python = ">=3.11"
+license         = { text = "LGPL-3.0-or-later" }
+authors         = [{ name = "Yurii Dorosh" }]
+keywords        = ["odoo", "odoo18", "docker", "template", "postgres", "rabbitmq", "kafka", "prometheus", "grafana"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Framework :: Odoo",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Office/Business",
+]
+
+[project.urls]
+Homepage = "https://github.com/yuriidorosh/odoo-base-docker-setup"
+Issues   = "https://github.com/yuriidorosh/odoo-base-docker-setup/issues"
+
+# -----------------------------------------------------------------------------
+# Build / packaging
+# -----------------------------------------------------------------------------
+# This repo is not published to PyPI; we declare a build backend only so tools
+# that expect one (uv, poetry-export, etc.) don't choke.
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []  # nothing to install — addons are loaded by Odoo, not pip.
+
+# -----------------------------------------------------------------------------
+# Black — code formatter
+# -----------------------------------------------------------------------------
+[tool.black]
+line-length    = 100
+target-version = ["py311"]
+include        = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.venv
+  | \.git
+  | build
+  | dist
+  | docker_compose
+  | src/addons/.*/migrations
+)/
+'''
+
+# -----------------------------------------------------------------------------
+# isort — import sorter
+# -----------------------------------------------------------------------------
+[tool.isort]
+profile                 = "black"
+line_length             = 100
+known_first_party       = ["odoo"]
+known_odoo              = ["odoo"]
+sections                = ["FUTURE", "STDLIB", "THIRDPARTY", "ODOO", "FIRSTPARTY", "LOCALFOLDER"]
+default_section         = "THIRDPARTY"
+skip                    = [".venv", "build", "dist", "docker_compose"]
+combine_as_imports      = true
+force_sort_within_sections = true
+
+# -----------------------------------------------------------------------------
+# Ruff — fast linter / autofixer
+# -----------------------------------------------------------------------------
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+src            = ["src", "tests"]
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "docker_compose",
+    "src/addons/*/migrations",
+    "src/addons/*/static",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "SIM", # simplify
+    "C4",  # comprehensions
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line too long — formatter handles it
+    "B008",  # function call in argument defaults (common in Odoo: fields.Many2one(default=...))
+    "B904",  # raise-from — Odoo code is fine without it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py"            = ["F401"]   # re-exports
+"__manifest__.py"        = ["F401"]   # Odoo manifests
+"tests/**/*.py"          = ["S101"]   # assert allowed in tests
+"src/addons/*/tests/**/*.py" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["odoo"]
+
+# -----------------------------------------------------------------------------
+# Mypy — static type checking
+# -----------------------------------------------------------------------------
+[tool.mypy]
+python_version            = "3.11"
+ignore_missing_imports    = true
+warn_unused_ignores       = true
+warn_redundant_casts      = true
+disallow_untyped_defs     = false        # Odoo addon code is rarely fully typed
+check_untyped_defs        = true
+exclude                   = [
+    "src/addons/.*/migrations/",
+    "src/addons/.*/static/",
+    "build/",
+    "dist/",
+    "\\.venv/",
+]
+
+[[tool.mypy.overrides]]
+module                = ["odoo.*", "odoo"]
+ignore_missing_imports = true
+
+# -----------------------------------------------------------------------------
+# Pytest
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion  = "7.0"
+testpaths   = ["tests", "src/addons"]
+python_files   = ["test_*.py", "tests.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+]
+markers = [
+    "unit: pure-Python unit tests (no Odoo, no DB).",
+    "integration: requires the Docker stack to be running.",
+    "odoo: requires a booted Odoo registry (via pytest-odoo).",
+    "slow: marks tests as slow (deselect with -m 'not slow').",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pkg_resources.*",
+    "ignore::PendingDeprecationWarning",
+]
+
+# -----------------------------------------------------------------------------
+# Coverage
+# -----------------------------------------------------------------------------
+[tool.coverage.run]
+branch  = true
+source  = ["src/addons", "scripts"]
+omit    = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/static/*",
+    "*/__manifest__.py",
+]
+
+[tool.coverage.report]
+show_missing  = true
+skip_covered  = false
+precision     = 1
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# -----------------------------------------------------------------------------
+# Pylint (used by pylint-odoo via scripts/lint-addons.sh)
+# -----------------------------------------------------------------------------
+[tool.pylint.main]
+load-plugins = ["pylint_odoo"]
+ignore       = ["migrations", "static", "build", "dist"]
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+    "duplicate-code",
+]
+
+[tool.pylint.format]
+max-line-length = 100

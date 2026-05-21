@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# Runtime libraries for Odoo 18 custom addons.
+# Most of Odoo's own deps live in the official image; this file is for the
+# extra libraries our addons / scripts need.
+# ---------------------------------------------------------------------------
+
+# Database driver
+psycopg2-binary==2.9.9
+
+# HTTP
+requests==2.32.3
+urllib3==2.2.3
+
+# Data / typing
+python-dateutil==2.9.0
+pytz==2024.2
+pydantic==2.9.2
+
+# Excel / reports
+openpyxl==3.1.5
+xlsxwriter==3.2.0
+reportlab==4.2.5
+
+# PDF / images
+qrcode==7.4.2
+Pillow==10.4.0
+
+# Templating / parsing
+Jinja2==3.1.4
+lxml==5.3.0
+beautifulsoup4==4.12.3
+
+# Auth / crypto helpers used by the password_security addon
+passlib==1.7.4
+bcrypt==4.2.0
+
+# Message brokers (optional, used when integrating with rabbitmq / kafka)
+pika==1.3.2
+kafka-python==2.0.2
+
+# Caching / queues
+redis==5.1.1
+
+# Metrics (for custom Prometheus exporters from inside Odoo)
+prometheus-client==0.21.0
+
+# Observability
+sentry-sdk==2.16.0
+structlog==24.4.0

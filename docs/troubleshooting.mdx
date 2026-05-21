@@ -1,0 +1,107 @@
+---
+title: Troubleshooting
+description: Common problems and their fixes when running the Odoo 18 docker stack.
+---
+
+# Troubleshooting
+
+A running list of issues that show up often and the fastest fix.
+
+## `network backend declared as external, but could not be found`
+
+The shared docker network was deleted (or never created).
+
+```bash
+make network
+# or, full bootstrap:
+make init
+```
+
+## Odoo container restarts in a loop
+
+Look at the logs first:
+
+```bash
+make logs-odoo
+```
+
+Most common causes:
+
+| Symptom in log                                       | Likely cause                                            | Fix                                                 |
+|------------------------------------------------------|---------------------------------------------------------|-----------------------------------------------------|
+| `could not translate host name "postgres"`           | Postgres container isn't on the `backend` network.      | `make down && make network && make up`              |
+| `FATAL: password authentication failed for user`     | `.env` and `odoo.conf` disagree on the DB password.     | Make them match, then `make restart`.               |
+| `Address already in use` on port 5433                | Another nginx/odoo is bound to the host port.           | Change `NGINX_PORT` in `.env`.                      |
+| `Permission denied` writing `/var/lib/odoo`          | Named volume owned by root after an upgrade.            | `docker volume rm odoo_odoo-data` then `make up`.   |
+| `Could not load module ... ImportError`              | A dep is missing from `requirements/base-requirements.txt`. | Add it, rebuild: `make up-odoo-build`.          |
+
+## "Database is being accessed by other users" on restore
+
+Odoo keeps connections open. Kill them before restoring:
+
+```bash
+make odoo-psql
+```
+
+```sql
+SELECT pg_terminate_backend(pid)
+FROM   pg_stat_activity
+WHERE  datname = 'prod' AND pid <> pg_backend_pid();
+```
+
+Then re-run `make restore-db FILE=...`.
+
+## RabbitMQ won't start: `eaccess` on `/var/lib/rabbitmq`
+
+The named volume kept ownership from a previous image version:
+
+```bash
+make down-rabbitmq
+docker volume rm rabbitmq_rabbitmq_data
+make up-rabbitmq
+```
+
+## Kafka logs `INVALID_REPLICATION_FACTOR` on first publish
+
+KRaft single-broker mode can't satisfy `replication.factor > 1`. Either:
+
+- Use `replication.factor=1` from your client, or
+- Add more brokers (out of scope for the bundled single-node dev compose).
+
+## Prometheus shows targets `down`
+
+Open <http://localhost:9090/targets>. Common causes:
+
+- Target container isn't running. → `make health`
+- Wrong port in `prometheus.yml`. → check the exporter's exposed port.
+- Odoo `/metrics` 404. → install an exporter addon (e.g. `prometheus_metrics`).
+
+## Grafana "Datasource not found"
+
+Provisioning runs once at first start. If you mounted Grafana data over a
+pre-existing volume:
+
+```bash
+docker volume rm monitoring_grafana_data
+make up-monitoring
+```
+
+## Make targets seem to use stale variables
+
+`make` `include .env` only picks up changes when re-invoked. After editing
+`.env`, just rerun `make <target>` — no cache to bust.
+
+## Resetting everything
+
+Nuclear option (wipes all stack volumes and containers):
+
+```bash
+make down-full
+docker compose -f docker_compose/db/docker-compose.yml         down -v
+docker compose -f docker_compose/odoo/docker-compose.yml       down -v
+docker compose -f docker_compose/monitoring/docker-compose.yml down -v
+docker compose -f docker_compose/message_brokers/rabbitmq/docker-compose.yml down -v
+docker compose -f docker_compose/message_brokers/kafka/docker-compose.yml    down -v
+make init
+make up
+```
